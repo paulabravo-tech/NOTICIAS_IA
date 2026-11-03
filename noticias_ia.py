@@ -9,7 +9,7 @@ Uso:
 Variables de entorno necesarias:
     TELEGRAM_TOKEN, TELEGRAM_CHAT_ID      (siempre)
     GEMINI_API_KEY                        (etapas 2 y 3)
-    GEMINI_MODEL                          (opcional, por defecto gemini-2.5-flash)
+    GEMINI_MODEL                          (opcional, por defecto gemini-3.5-flash-lite)
 """
 
 import calendar
@@ -45,9 +45,10 @@ FEEDS = {
 HORAS_ATRAS = 24          # solo noticias de las ultimas 24 horas
 MAX_CANDIDATAS = 60       # maximo de noticias que se le pasan a Gemini
 CUANTAS = 5               # cuantas noticias quieres en el reporte
-MODELO = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-# Si el modelo principal esta saturado, se prueba con estos (en orden).
-MODELOS_RESPALDO = ["gemini-2.5-flash-lite"]
+# Los modelos 2.5 fueron retirados por Google (404 / 503 persistente). Se usan los de la familia 3.x.
+MODELO = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+# Si el modelo principal esta saturado o ya no existe, se prueba con estos (en orden).
+MODELOS_RESPALDO = ["gemini-3.6-flash"]
 ESPERAS_REINTENTO = [10, 30, 60]  # segundos de espera entre reintentos del mismo modelo
 USER_AGENT = "Mozilla/5.0 (compatible; NoticiasIA/1.0)"
 
@@ -205,6 +206,8 @@ NOTICIAS:
                 ultimo_error = e
                 temporal = codigo in (429, 500, 502, 503, 504)
                 print(f"[aviso] {modelo}, intento {intento}: {type(e).__name__} {codigo}")
+                if codigo == 404:
+                    break  # modelo retirado o inexistente: no se reintenta, pasa al siguiente modelo
                 if not temporal:
                     raise  # error no temporal (clave invalida, modelo inexistente...): no tiene sentido reintentar
                 if espera is None:
