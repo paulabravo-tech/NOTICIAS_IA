@@ -18,6 +18,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 import feedparser
@@ -45,6 +46,9 @@ HORAS_ATRAS = 24          # solo noticias de las ultimas 24 horas
 MAX_CANDIDATAS = 60       # maximo de noticias que se le pasan a Gemini
 CUANTAS = 5               # cuantas noticias quieres en el reporte
 MODELO = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# Si el modelo principal esta saturado, se prueba con estos (en orden).
+MODELOS_RESPALDO = ["gemini-2.5-flash-lite"]
+ESPERAS_REINTENTO = [10, 30, 60]  # segundos de espera entre reintentos del mismo modelo
 USER_AGENT = "Mozilla/5.0 (compatible; NoticiasIA/1.0)"
 
 
@@ -178,14 +182,39 @@ NOTICIAS:
 {lista}
 """
 
-    respuesta = cliente.models.generate_content(
-        model=MODELO,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2,
-        ),
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        temperature=0.2,
     )
+
+    # Reintentos: si el modelo esta saturado (503) o con limite (429), espera y reintenta;
+    # si sigue fallando, pasa al siguiente modelo de la lista.
+    modelos = [MODELO] + [m for m in MODELOS_RESPALDO if m != MODELO]
+    ultimo_error = None
+    respuesta = None
+    for modelo in modelos:
+        for intento, espera in enumerate(ESPERAS_REINTENTO + [None], 1):
+            try:
+                respuesta = cliente.models.generate_content(
+                    model=modelo, contents=prompt, config=config
+                )
+                print(f"[ok] Gemini respondio con {modelo} (intento {intento})")
+                break
+            except Exception as e:  # noqa: BLE001
+                codigo = getattr(e, "code", None) or getattr(e, "status_code", None)
+                ultimo_error = e
+                temporal = codigo in (429, 500, 502, 503, 504)
+                print(f"[aviso] {modelo}, intento {intento}: {type(e).__name__} {codigo}")
+                if not temporal:
+                    raise  # error no temporal (clave invalida, modelo inexistente...): no tiene sentido reintentar
+                if espera is None:
+                    break  # agotados los reintentos de este modelo
+                time.sleep(espera)
+        if respuesta is not None:
+            break
+
+    if respuesta is None:
+        raise RuntimeError(f"Gemini no respondio con ningun modelo: {ultimo_error}")
 
     elegidas = json.loads(respuesta.text)
     resultado = []
@@ -239,7 +268,16 @@ def main() -> None:
     if not candidatas:
         mensaje = "Hoy no encontre noticias recientes en las fuentes configuradas."
     else:
-        items = elegir_con_gemini(candidatas)
+        try:
+            items = elegir_con_gemini(candidatas)
+        except Exception as e:  # noqa: BLE001
+            # Aviso por Telegram para enterarte de que hoy fallo, y se marca la ejecucion como fallida.
+            if "--seco" not in args:
+                try:
+                    enviar_telegram(f"El agente de noticias fallo hoy: {type(e).__name__}. Revisa la pestana Actions en GitHub.")
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
         mensaje = armar_mensaje(items) if items else "Gemini no devolvio noticias validas hoy."
 
     if "--seco" in args:
