@@ -1,0 +1,27 @@
+name: Noticias economia
+
+on:
+  schedule:
+    # 12:00 UTC = 7:00 a.m. en Colombia. Cambia la hora si quieres otra.
+    - cron: "0 12 * * *"
+  workflow_dispatch:   # permite ejecutarlo a mano desde la pestana Actions
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install feedparser requests google-genai
+
+      - name: Ejecutar agente
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python noticias_economia.py
