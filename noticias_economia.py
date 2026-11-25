@@ -53,7 +53,7 @@ CUANTAS_COLOMBIA = 2
 CUANTAS_MUNDO = 3
 MODELO = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 MODELOS_RESPALDO = ["gemini-3.6-flash"]
-ESPERAS_REINTENTO = [10, 30, 60]
+ESPERAS_REINTENTO = [20, 60, 120]
 USER_AGENT = "Mozilla/5.0 (compatible; NoticiasEconomia/1.0)"
 
 
@@ -302,19 +302,30 @@ def main() -> None:
         try:
             sel = elegir_con_gemini(colombia, mundo)
         except Exception as e:  # noqa: BLE001
-            if "--seco" not in args:
-                try:
-                    enviar_telegram(
-                        f"El agente de noticias economicas fallo hoy: {type(e).__name__}. "
-                        "Revisa la pestana Actions en GitHub."
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
-            raise
-        if sel["colombia"] or sel["mundo"]:
-            mensaje = armar_mensaje(sel)
+            # Plan B: Gemini no respondio. Se envian las mas recientes tal cual, sin resumen de IA.
+            print(f"[aviso] Gemini fallo ({type(e).__name__}); se envia version sin IA")
+
+            def crudo(lista: list[dict], cuantas: int) -> list[dict]:
+                return [
+                    {
+                        "titulo": n["titulo"],
+                        "resumen": n["resumen"][:200],
+                        "enlace": n["enlace"],
+                        "fuente": n["fuente"],
+                    }
+                    for n in lista[:cuantas]
+                ]
+
+            sel = {
+                "colombia": crudo(colombia, CUANTAS_COLOMBIA),
+                "mundo": crudo(mundo, CUANTAS_MUNDO),
+            }
+            mensaje = armar_mensaje(sel) + "\n<i>Nota: hoy Gemini no estuvo disponible; estas son las mas recientes, sin seleccion ni resumen por IA.</i>"
         else:
-            mensaje = "Gemini no devolvio noticias validas hoy."
+            if sel["colombia"] or sel["mundo"]:
+                mensaje = armar_mensaje(sel)
+            else:
+                mensaje = "Gemini no devolvio noticias validas hoy."
 
     if "--seco" in args:
         print("\n--- VISTA PREVIA (no se envia) ---\n")

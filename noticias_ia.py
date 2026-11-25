@@ -49,7 +49,7 @@ CUANTAS = 5               # cuantas noticias quieres en el reporte
 MODELO = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 # Si el modelo principal esta saturado o ya no existe, se prueba con estos (en orden).
 MODELOS_RESPALDO = ["gemini-3.6-flash"]
-ESPERAS_REINTENTO = [10, 30, 60]  # segundos de espera entre reintentos del mismo modelo
+ESPERAS_REINTENTO = [20, 60, 120]  # segundos de espera entre reintentos del mismo modelo
 USER_AGENT = "Mozilla/5.0 (compatible; NoticiasIA/1.0)"
 
 
@@ -274,14 +274,20 @@ def main() -> None:
         try:
             items = elegir_con_gemini(candidatas)
         except Exception as e:  # noqa: BLE001
-            # Aviso por Telegram para enterarte de que hoy fallo, y se marca la ejecucion como fallida.
-            if "--seco" not in args:
-                try:
-                    enviar_telegram(f"El agente de noticias fallo hoy: {type(e).__name__}. Revisa la pestana Actions en GitHub.")
-                except Exception:  # noqa: BLE001
-                    pass
-            raise
-        mensaje = armar_mensaje(items) if items else "Gemini no devolvio noticias validas hoy."
+            # Plan B: Gemini no respondio. Se envian las noticias mas recientes tal cual, sin resumen de IA.
+            print(f"[aviso] Gemini fallo ({type(e).__name__}); se envia version sin IA")
+            items = [
+                {
+                    "titulo": n["titulo"],
+                    "resumen": n["resumen"][:200],
+                    "enlace": n["enlace"],
+                    "fuente": n["fuente"],
+                }
+                for n in candidatas[:CUANTAS]
+            ]
+            mensaje = armar_mensaje(items) + "\n<i>Nota: hoy Gemini no estuvo disponible; estas son las mas recientes, sin seleccion ni resumen por IA.</i>"
+        else:
+            mensaje = armar_mensaje(items) if items else "Gemini no devolvio noticias validas hoy."
 
     if "--seco" in args:
         print("\n--- VISTA PREVIA (no se envia) ---\n")
